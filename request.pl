@@ -15,7 +15,8 @@ GetOptions(
     \%args,
     'uris=s',
     'users=s',
-    'selenium-ips=s',
+    'user-index=n',
+    'selenium-ip=s',
     'iterations=n',
     'help' => sub { pod2usage(1) }
 ) or pod2usage(2);
@@ -28,12 +29,12 @@ GetOptions(
 
 =cut
 
-# Default to 2 threads
+# Set teh defaults
 $args{iterations} //= 100;
-
+$args{'user-index'} //= 1;
 croak "Need to specify --uris <file>" unless defined $args{uris};
 croak "Need to specify --users <file>" unless defined $args{users};
-croak "Need to specify --selenium-ips ip_1[,ip_2, ...]" unless defined $args{'selenium-ips'};
+croak "Need to specify --selenium-ip <ip>" unless defined $args{'selenium-ip'};
 
 # Load up the URIs from the file
 open(my $fh, "<:encoding(UTF-8)", $args{uris}) or die "Cannot open $args{uris}";
@@ -53,35 +54,42 @@ chomp @users;
 close($fh);
 
 
-# Split the selenium IPs and connect to the drivers
-my @selenium_ips = split(",", $args{'selenium-ips'});
+# Pull out the user we'll be using.
+my $user = $users[ $args{'user-index'} ];
 
-my @selenium_drivers = ();
-for my $selenium_host (@selenium_ips) {
-	say "- Creating Selenium driver to $selenium_host";
-
-	my $driver = Selenium::Remote::Driver->new(
-	    browser_name => 'firefox',
-	    error_handler => sub { print $_[1]; },
-	    accept_ssl_certs => 1,
-	    remote_server_addr => $selenium_host,
-	    port               => '4444',
-	    'auto_close'         => 1
-	);
-
-	push @selenium_drivers, { host => $selenium_host, driver => $driver };
-}
-
-
-say "- Requesting random URI/user pairs with $args{iterations} iterations";
-
+# Make the requests
+say "- Requesting random URIs with $args{iterations} iterations";
 foreach (1 .. $args{iterations}) {
-    my ($uri_r, $user_r, $sel_r) = (@uris[rand @uris], @users[rand @users], @selenium_drivers[rand @selenium_drivers]);
+    my $rand_sleep = int(rand(40));
 
-    $uri_r->userinfo($user_r);
-    say "- Requesting " . $uri_r->as_string . " from " . $sel_r->{host};
+    my $driver = Selenium::Remote::Driver->new(
+        browser_name => 'chrome',
+        pageLoadStrategy => 'eager',
+        #debug => 1,
+        extra_capabilities => {
+            'goog:chromeOptions' => {
+    	    args => [
+                    'ignore-certificate-errors'
+    	    ]
+    	}
+        },
+        error_handler => sub { print $_[1]; },
+        accept_ssl_certs => 0,
+        remote_server_addr => $args{'selenium-ip'},
+        port               => '4444'
+    );
 
-    $sel_r->{driver}->get( $uri_r->as_string );
+    say "- Index $args{'user-index'} sleeping for $rand_sleep";
+    sleep($rand_sleep);
+
+    my $uri_r = @uris[rand @uris];
+
+    $uri_r->userinfo($user);
+    say "- Requesting " . $uri_r->as_string;
+    $driver->get( $uri_r->as_string );
+
+    $driver->close();
+    $driver->quit();
 }
 
 
